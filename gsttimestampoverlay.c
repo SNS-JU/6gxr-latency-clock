@@ -40,6 +40,7 @@
 #include "gsttimestampoverlay.h"
 
 #include <string.h>
+#include <sys/time.h>
 
 GST_DEBUG_CATEGORY_STATIC (gst_timestampoverlay_debug_category);
 #define GST_CAT_DEFAULT gst_timestampoverlay_debug_category
@@ -57,6 +58,8 @@ enum
 {
   PROP_0
 };
+
+GstClockTime frame_id=1;
 
 /* pad templates */
 
@@ -190,8 +193,9 @@ gst_timestampoverlay_transform_frame_ip (GstVideoFilter * filter, GstVideoFrame 
 
   GST_DEBUG_OBJECT (overlay, "transform_frame_ip");
 
+  struct timespec systime_st;
   GstClockTime buffer_time, stream_time, running_time, clock_time, latency,
-      render_time, render_realtime;
+      render_time, render_realtime, systime;
   GstSegment *segment = &GST_BASE_TRANSFORM (overlay)->segment;
   unsigned char * imgdata;
 
@@ -249,6 +253,32 @@ gst_timestampoverlay_transform_frame_ip (GstVideoFilter * filter, GstVideoFrame 
       frame->info.finfo->pixel_stride[0]);
   draw_timestamp (5, render_realtime, imgdata, frame->info.stride[0],
       frame->info.finfo->pixel_stride[0]);
+  clock_gettime(CLOCK_REALTIME, &systime_st);
+  systime = (GstClockTime)systime_st.tv_sec * 1000000000 + systime_st.tv_nsec;
+  draw_timestamp (6, systime, imgdata, frame->info.stride[0],
+      frame->info.finfo->pixel_stride[0]);
+  draw_timestamp (7, frame_id, imgdata, frame->info.stride[0],
+      frame->info.finfo->pixel_stride[0]);
+  frame_id++;
+
+  ulong diff_time = (ulong)render_realtime - systime;
+
+  GST_DEBUG_OBJECT (filter, "Write timestamps: buffer_time = %ld"
+      ", stream_time = %ld" ", running_time = %ld"
+      ", clock_time = %ld" ", render_time = %ld"
+      ", render_realtime = %ld"
+      ", system_time_ns = %ld"
+      ", diff = %ld"
+      ", frame_id = %lu",
+      GST_TIME_AS_NSECONDS(buffer_time),
+      GST_TIME_AS_NSECONDS(stream_time),
+      GST_TIME_AS_NSECONDS(running_time),
+      GST_TIME_AS_NSECONDS(clock_time),
+      GST_TIME_AS_NSECONDS(render_time),
+      GST_TIME_AS_NSECONDS(render_realtime),
+      GST_TIME_AS_NSECONDS(systime),
+      GST_TIME_AS_NSECONDS(diff_time),
+      frame_id);
 
   return GST_FLOW_OK;
 }
