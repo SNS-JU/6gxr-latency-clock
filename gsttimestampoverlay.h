@@ -23,6 +23,10 @@
 #include <gst/video/video.h>
 #include <gst/video/gstvideofilter.h>
 
+#include <liquid.h>
+
+#include "gsttimestampcommon.h"
+
 G_BEGIN_DECLS
 
 #define GST_TYPE_TIMESTAMPOVERLAY   (gst_timestampoverlay_get_type())
@@ -37,9 +41,18 @@ typedef struct _GstTimeStampOverlayClass GstTimeStampOverlayClass;
 struct _GstTimeStampOverlay
 {
   GstVideoFilter base_timestampoverlay;
+  uint64_t frame_id;
 
   GstClockTime latency;
   GstClock *realtime_clock;
+  fec_scheme fec_scheme;
+  fec encoder;
+  unsigned int rows;
+  unsigned int fec_n;
+  unsigned int fec_k;
+  unsigned char *msg_org;
+  unsigned char *msg_enc;
+
 };
 
 struct _GstTimeStampOverlayClass

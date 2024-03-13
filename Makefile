@@ -1,12 +1,14 @@
 all: client server libgsttimeoverlayparse.so
 
-CFLAGS?=-Wall -Werror -O2
+CFLAGS?=-Werror -Wno-deprecated-declarations -O2 -I ../liquid-dsp/include -L ../liquid-dsp -lfec -lliquid
 
 libgsttimeoverlayparse.so : \
         gsttimestampoverlay.c \
         gsttimestampoverlay.h \
         gsttimeoverlayparse.c \
         gsttimeoverlayparse.h \
+        gsttimestampcommon.c \
+        gsttimestampcommon.h \
         plugin.c
 	$(CC) -o$@ --shared -fPIC $^ $(CFLAGS) \
 	    $$(pkg-config --cflags --libs gstreamer-1.0 gstreamer-video-1.0)

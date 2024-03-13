@@ -41,6 +41,7 @@
 
 #include <string.h>
 #include <sys/time.h>
+#include <inttypes.h>
 
 GST_DEBUG_CATEGORY_STATIC (gst_timestampoverlay_debug_category);
 #define GST_CAT_DEFAULT gst_timestampoverlay_debug_category
@@ -56,10 +57,75 @@ static gboolean gst_timestampoverlay_set_clock (GstElement * element,
 
 enum
 {
-  PROP_0
+  PROP_0,
+  PROP_FEC_SCHEME
 };
 
-GstClockTime frame_id=1;
+static void
+gst_timestampoverlay_set_fec_scheme (GstTimeStampOverlay *overlay,
+                                     fec_scheme fs)
+{
+  overlay->fec_scheme = fs;
+
+  if (overlay->encoder) {
+      fec_destroy(overlay->encoder);
+      overlay->encoder = NULL;
+  }
+  free(overlay->msg_org);
+  free(overlay->msg_enc);
+  overlay->msg_org = NULL;
+  overlay->msg_enc = NULL;
+
+  overlay->encoder =  fec_create(fs, NULL);
+
+  // decoded message length (bytes)
+  unsigned int n = 8;
+  // compute encoded message length
+  unsigned int k = fec_get_enc_msg_length(fs, n);
+
+  overlay->fec_n = n;
+  overlay->fec_k = k;
+  overlay->msg_org = malloc(sizeof(char)* n);
+  overlay->msg_enc = malloc(sizeof(char) * (8 + k));
+  memset(overlay->msg_enc, 0, sizeof(char) * (8 + k));
+  overlay->rows = k / 8;
+  if (overlay->rows * 8 != n) {
+    overlay->rows ++;
+  }
+  GST_INFO_OBJECT (overlay, "set_property: fec_scheme n:%u k:%u rows:%u",
+                   n, k, overlay->rows);
+}
+
+static void
+gst_timestampoverlay_set_property (GObject * object, guint prop_id,
+    const GValue * value, GParamSpec * pspec)
+{
+  GstTimeStampOverlay *overlay = GST_TIMESTAMPOVERLAY (object);
+
+  switch (prop_id) {
+  case PROP_FEC_SCHEME:
+    gst_timestampoverlay_set_fec_scheme (overlay, g_value_get_enum (value));
+    break;
+  default:
+    break;
+  }
+}
+
+static void
+gst_timestampoverlay_get_property (GObject * object, guint prop_id,
+    GValue * value, GParamSpec * pspec)
+{
+  GstTimeStampOverlay *overlay = GST_TIMESTAMPOVERLAY (object);
+
+  switch (prop_id) {
+  case PROP_FEC_SCHEME:
+    g_value_set_enum (value, overlay->fec_scheme);
+    break;
+  default:
+    G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+    break;
+  }
+}
 
 /* pad templates */
 
@@ -100,6 +166,17 @@ gst_timestampoverlay_class_init (GstTimeStampOverlayClass * klass)
       "video so they can be read off the video afterwards",
       "William Manley <will@williammanley.net>");
 
+  /* define virtual function pointers */
+  gobject_class->set_property = gst_timestampoverlay_set_property;
+  gobject_class->get_property = gst_timestampoverlay_get_property;
+
+  /* define properties */
+  g_object_class_install_property (gobject_class, PROP_FEC_SCHEME,
+    g_param_spec_enum ("fec-scheme", "Foward Error Correction Scheme",
+                       "FEC Scheme to use",
+                       GST_TYPE_FEC_SCHEME, LIQUID_FEC_NONE,
+                       G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
   gobject_class->dispose = GST_DEBUG_FUNCPTR (gst_timestampoverlay_dispose);
   gstelement_class->set_clock = GST_DEBUG_FUNCPTR (gst_timestampoverlay_set_clock);
   base_transform_class->src_event = GST_DEBUG_FUNCPTR (gst_timestampoverlay_src_event);
@@ -107,15 +184,21 @@ gst_timestampoverlay_class_init (GstTimeStampOverlayClass * klass)
 }
 
 static void
-gst_timestampoverlay_init (GstTimeStampOverlay *timestampoverlay)
+gst_timestampoverlay_init (GstTimeStampOverlay *overlay)
 {
-  GST_OBJECT_FLAG_SET (timestampoverlay, GST_ELEMENT_FLAG_REQUIRE_CLOCK);
+  GST_OBJECT_FLAG_SET (overlay, GST_ELEMENT_FLAG_REQUIRE_CLOCK);
+  overlay->frame_id = 0;
 
-  timestampoverlay->latency = GST_CLOCK_TIME_NONE;
-  timestampoverlay->realtime_clock = g_object_new (GST_TYPE_SYSTEM_CLOCK,
+  overlay->latency = GST_CLOCK_TIME_NONE;
+  overlay->realtime_clock = g_object_new (GST_TYPE_SYSTEM_CLOCK,
       "clock-type", GST_CLOCK_TYPE_REALTIME, NULL);
-  GST_OBJECT_FLAG_SET (timestampoverlay->realtime_clock,
+  GST_OBJECT_FLAG_SET (overlay->realtime_clock,
       GST_CLOCK_FLAG_CAN_SET_MASTER);
+
+  overlay->encoder = NULL;
+  overlay->msg_org = NULL;
+  overlay->msg_enc = NULL;
+  gst_timestampoverlay_set_fec_scheme (overlay, LIQUID_FEC_NONE);
 }
 
 static void
@@ -123,6 +206,14 @@ gst_timestampoverlay_dispose (GObject *object)
 {
   GstTimeStampOverlay *timeoverlay = GST_TIMESTAMPOVERLAY (object);
   g_clear_object (&timeoverlay->realtime_clock);
+
+  if (timeoverlay->encoder) {
+    fec_destroy(timeoverlay->encoder);
+  }
+  free(timeoverlay->msg_org);
+  free(timeoverlay->msg_enc);
+  timeoverlay->msg_org = NULL;
+  timeoverlay->msg_enc = NULL;
 }
 
 static gboolean
@@ -194,91 +285,55 @@ gst_timestampoverlay_transform_frame_ip (GstVideoFilter * filter, GstVideoFrame 
   GST_DEBUG_OBJECT (overlay, "transform_frame_ip");
 
   struct timespec systime_st;
-  GstClockTime buffer_time, stream_time, running_time, clock_time, latency,
-      render_time, render_realtime, systime;
+  GstClockTime systime0;
+  uint64_t systime;
   GstSegment *segment = &GST_BASE_TRANSFORM (overlay)->segment;
   unsigned char * imgdata;
 
-  buffer_time = GST_BUFFER_TIMESTAMP (frame->buffer);
-
-  if (!GST_CLOCK_TIME_IS_VALID (buffer_time)) {
-    GST_DEBUG_OBJECT (filter, "Can't draw timestamps: buffer timestamp is "
-        "invalid");
-    return GST_FLOW_OK;
-  }
 
   if (frame->info.stride[0] < (8 * frame->info.finfo->pixel_stride[0] * 64)) {
     GST_WARNING_OBJECT (filter, "Can't draw timestamps: video-frame is to narrow");
     return GST_FLOW_OK;
   }
 
-  GST_DEBUG ("buffer with timestamp %" GST_TIME_FORMAT,
-      GST_TIME_ARGS (buffer_time));
+  clock_gettime(CLOCK_REALTIME, &systime_st);
+  systime0 = (GstClockTime)systime_st.tv_sec * 1000000000 + systime_st.tv_nsec;
+  systime = (uint64_t)systime0 & 0xFFffFFffFF000000ULL;
 
-  stream_time = gst_segment_to_stream_time (segment, GST_FORMAT_TIME,
-      buffer_time);
-  running_time = gst_segment_to_running_time (segment, GST_FORMAT_TIME,
-      buffer_time);
-  clock_time = running_time + gst_element_get_base_time (GST_ELEMENT (overlay));
+  overlay->frame_id++;
+  systime |= overlay->frame_id;
+  GST_INFO_OBJECT (filter, "systime: %" PRIx64 ", frame_id: %" PRIx64,
+                   systime, overlay->frame_id);
 
-  latency = overlay->latency;
-  if (GST_CLOCK_TIME_IS_VALID (latency))
-    render_time = clock_time + latency;
-  else
-    render_time = clock_time;
 
-  GST_OBJECT_LOCK (overlay->realtime_clock);
-  render_realtime = gst_clock_unadjust_unlocked (
-      overlay->realtime_clock, render_time);
-  GST_OBJECT_UNLOCK (overlay->realtime_clock);
+  if (overlay->fec_k > 0) {
+    fec_encode(overlay->encoder, overlay->fec_n,
+               (unsigned char*)&systime, overlay->msg_enc);
+  } else {
+    // scheme == unknown, or some other corner case.
+    memcpy(overlay->msg_enc, &systime, sizeof(systime));
+  }
 
   imgdata = frame->data[0];
 
   /* Centre Vertically: */
-  imgdata += (frame->info.height - 6 * 8) * frame->info.stride[0] / 2;
+  unsigned int rows = overlay->rows;
+  imgdata += (frame->info.height - rows * 8) * frame->info.stride[0] / 2;
 
   /* Centre Horizontally: */
   imgdata += (frame->info.width - 64 * 8) * frame->info.finfo->pixel_stride[0]
       / 2;
 
-  draw_timestamp (0, buffer_time, imgdata, frame->info.stride[0],
-      frame->info.finfo->pixel_stride[0]);
-  draw_timestamp (1, stream_time, imgdata, frame->info.stride[0],
-      frame->info.finfo->pixel_stride[0]);
-  draw_timestamp (2, running_time, imgdata, frame->info.stride[0],
-      frame->info.finfo->pixel_stride[0]);
-  draw_timestamp (3, clock_time, imgdata, frame->info.stride[0],
-      frame->info.finfo->pixel_stride[0]);
-  draw_timestamp (4, render_time, imgdata, frame->info.stride[0],
-      frame->info.finfo->pixel_stride[0]);
-  draw_timestamp (5, render_realtime, imgdata, frame->info.stride[0],
-      frame->info.finfo->pixel_stride[0]);
-  clock_gettime(CLOCK_REALTIME, &systime_st);
-  systime = (GstClockTime)systime_st.tv_sec * 1000000000 + systime_st.tv_nsec;
-  draw_timestamp (6, systime, imgdata, frame->info.stride[0],
-      frame->info.finfo->pixel_stride[0]);
-  draw_timestamp (7, frame_id, imgdata, frame->info.stride[0],
-      frame->info.finfo->pixel_stride[0]);
-  frame_id++;
 
-  ulong diff_time = (ulong)render_realtime - systime;
-
-  GST_DEBUG_OBJECT (filter, "Write timestamps: buffer_time = %ld"
-      ", stream_time = %ld" ", running_time = %ld"
-      ", clock_time = %ld" ", render_time = %ld"
-      ", render_realtime = %ld"
-      ", system_time_ns = %ld"
-      ", diff = %ld"
-      ", frame_id = %lu",
-      GST_TIME_AS_NSECONDS(buffer_time),
-      GST_TIME_AS_NSECONDS(stream_time),
-      GST_TIME_AS_NSECONDS(running_time),
-      GST_TIME_AS_NSECONDS(clock_time),
-      GST_TIME_AS_NSECONDS(render_time),
-      GST_TIME_AS_NSECONDS(render_realtime),
-      GST_TIME_AS_NSECONDS(systime),
-      GST_TIME_AS_NSECONDS(diff_time),
-      frame_id);
+  uint64_t *msg = (uint64_t*)overlay->msg_enc;
+  for (int r = 0; r < overlay->rows; r++) {
+    uint64_t part = msg[r];
+    draw_timestamp (r,
+                    part,
+                    imgdata,
+                    frame->info.stride[0],
+                    frame->info.finfo->pixel_stride[0]);
+  }
 
   return GST_FLOW_OK;
 }

@@ -23,6 +23,8 @@
 #include <gst/video/video.h>
 #include <gst/video/gstvideofilter.h>
 
+#include <liquid.h>
+
 G_BEGIN_DECLS
 
 #define GST_TYPE_TIMEOVERLAYPARSE   (gst_timeoverlayparse_get_type())
@@ -37,6 +39,14 @@ typedef struct _GstTimeOverlayParseClass GstTimeOverlayParseClass;
 struct _GstTimeOverlayParse
 {
   GstVideoFilter base_timeoverlayparse;
+
+  fec_scheme fec_scheme;
+  fec decoder;
+  unsigned int rows;
+  unsigned int fec_n;
+  unsigned int fec_k;
+  unsigned char *msg_enc;
+  unsigned char *msg_dec;
 };
 
 struct _GstTimeOverlayParseClass
