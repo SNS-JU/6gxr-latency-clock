@@ -33,15 +33,33 @@ gst_fec_scheme_get_type (void)
       { LIQUID_FEC_HAMMING74, "Hamming (7,4) block code", "hamming74" },
       { LIQUID_FEC_HAMMING84, "Hamming (7,4) with extra parity bit, r1/2", "hamming84" },
       { LIQUID_FEC_HAMMING128,"Hamming (12,8) block code, r2/3", "hamming128" },
+
       { LIQUID_FEC_GOLAY2412, "Golay (24,12) block code, r1/2", "golay2421" },
       { LIQUID_FEC_SECDED2216, "SEC-DED (22,16) block code, r8/11", "secded2216" },
       { LIQUID_FEC_SECDED3932, "SEC-DED (39,32) block code", "secded3932" },
       { LIQUID_FEC_SECDED7264, "SEC-DED (72,64) block code, r8/9", "secdec7264" },
+
       { LIQUID_FEC_CONV_V27,  "r1/2, K=7, dfree=10",      "conv_v27" },
       { LIQUID_FEC_CONV_V29,  "r1/2, K=9, dfree=12",      "conv_v29" },
       { LIQUID_FEC_CONV_V39,  "r1/3, K=9, dfree=18",      "conv_v39" },
       { LIQUID_FEC_CONV_V615, "r1/6, K=15, dfree<=57",    "conv_v615" },
+
+      // punctured (perforated) codes
       { LIQUID_FEC_CONV_V27P23, "r2/3, K=7, dfree=6", "conv_v27p23" },
+      { LIQUID_FEC_CONV_V27P34, "r3/4, K=7, dfree=5", "conv_v27p34" },
+      { LIQUID_FEC_CONV_V27P45, "r4/5, K=7, dfree=4", "conv_v27p45" },
+      { LIQUID_FEC_CONV_V27P56, "r5/6, K=7, dfree=4", "conv_v27p56" },
+      { LIQUID_FEC_CONV_V27P67, "r6/7, K=7, dfree=3", "conv_v27p67" },
+      { LIQUID_FEC_CONV_V27P78, "r7/8, K=7, dfree=3", "conv_v27p78" },
+
+      { LIQUID_FEC_CONV_V29P23, "r2/3, K=9, dfree=7", "conv_v29p23" },
+      { LIQUID_FEC_CONV_V29P34, "r3/4, K=9, dfree=6", "conv_v29p34" },
+      { LIQUID_FEC_CONV_V29P45, "r4/5, K=9, dfree=5", "conv_v29p45" },
+      { LIQUID_FEC_CONV_V29P56, "r5/6, K=9, dfree=5", "conv_v29p56" },
+      { LIQUID_FEC_CONV_V29P67, "r6/7, K=9, dfree=4", "conv_v29p67" },
+      { LIQUID_FEC_CONV_V29P78, "r7/8, K=9, dfree=4", "conv_v29p78" },
+
+      // Reed-Solomon codes
       { LIQUID_FEC_RS_M8,     "Reed-Solomon, m=8, n=255, k=223", "rs_m8" },
       { 0, NULL, NULL },
     };
