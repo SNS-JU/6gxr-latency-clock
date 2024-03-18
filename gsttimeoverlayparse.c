@@ -251,11 +251,9 @@ gst_timeoverlayparse_transform_frame_ip (GstVideoFilter * filter, GstVideoFrame 
   GstClockTime remote_time = (GstClockTime)( info & 0xFFffFFffFF000000ULL );
   latency = systime - remote_time;
 
-  GST_INFO_OBJECT (filter, "Latency: %ld; Frame-id: %lu",
+  GST_INFO_OBJECT (filter, "Systime: %ld; Latency: %ld; Frame-id: %lu",
+      GST_TIME_AS_NSECONDS(systime),
       GST_TIME_AS_NSECONDS(latency),
-      frame_id);
-  GST_INFO_OBJECT (filter, "remote_time: %" PRIx64 ", Fr_id: %" PRIx64,
-      remote_time,
       frame_id);
 
   return GST_FLOW_OK;
