@@ -1,3 +1,16 @@
+# About this fork
+
+This fork of the
+[latency-clock](https://github.com/stb-tester/latency-clock)
+project contains work created as part of the
+[REQUIEM](https://bit.ly/tki-6gxr-requiem)
+[open-call](https://www.6g-xr.eu/open-calls/oc1-results/) of the
+[6G-XR](https://www.6g-xr.eu/) EU project.
+
+This version of the latency-clock only transmits the systime of the
+sender.  However, the new fec-scheme configuration property makes
+possible to send this information more reliably.
+
 latency-clock
 =============
 
